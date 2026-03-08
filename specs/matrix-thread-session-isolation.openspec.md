@@ -52,7 +52,7 @@ As a result, Matrix does not match Discord’s proven thread-binding model, espe
 2. Session binding service integration
 - Register a Matrix adapter with the shared session binding service.
 - Conversation ref for threaded Matrix context must map to:
-  - `conversationId = "<roomId>#<threadRootId>"`
+  - `conversationId = "<roomId>||<threadRootId>"`
   - `parentConversationId = "<roomId>"`
 - Conversation refs for non-thread room traffic remain room-scoped.
 - DM behavior remains unchanged.
@@ -93,6 +93,40 @@ As a result, Matrix does not match Discord’s proven thread-binding model, espe
 - Binding resolution must always include normalized account scope.
 - Two bot accounts in same room/thread namespace must never resolve each other’s bindings.
 
+10. E2EE (end-to-end encryption) considerations
+- The Matrix SDK must decrypt events before thread relation extraction. `resolveMatrixThreadRootId()` operates on decrypted event content; if the SDK has not decrypted the event, `m.relates_to` will be absent from the plaintext payload.
+- If decryption fails (missing keys, unverified session, Olm/Megolm errors), the handler must treat the message as non-threaded (room-scoped fallback) and log a structured warning (`matrix.thread.decryption_failed`).
+- The bot's device must be verified and have access to room key history for thread binding to function in E2EE rooms. Document this as an operator prerequisite.
+- Thread bindings themselves (the binding records) are not encrypted; they contain only event IDs and session keys, not message content.
+
+11. Persistence
+- Binding state must be persisted to `<dataDir>/matrix/thread-bindings.json`.
+- Write strategy: atomic write via write-to-temp-file + `fs.rename()` to prevent corruption on crash.
+- On startup, reload bindings from the persisted file. If the file is missing, start with empty state. If the file is corrupt (invalid JSON), log an error (`matrix.thread.persistence_corrupt`), rename the corrupt file to `thread-bindings.json.corrupt.<timestamp>`, and start with empty state.
+- Persist after every binding mutation (create, touch, unbind, sweep). Debounce writes to at most once per second to avoid I/O pressure from rapid touch updates.
+
+12. Race condition mitigation for binding creation
+- A race window exists between when a spawn request is received and when the binding record is created. If the user sends a follow-up message during this window, it may route via suffix fallback to a different session key, causing split-brain.
+- Mitigation: create the binding record synchronously (in-memory) during the `subagent_spawning` hook, before returning the spawn acknowledgment. Persistence can be async/debounced, but the in-memory binding must be visible to the routing path immediately.
+- If synchronous bind is not feasible, implement a "pending bind" state: the routing path must check for pending binds and queue routing decisions (hold the message for up to 2 seconds) until the bind completes or times out.
+
+13. Thread root event ID stability after redaction
+- Matrix spec (room version 11+): `m.relates_to` references in child events are preserved even after the root event is redacted. The `event_id` referenced in `rel_type: m.thread` remains stable.
+- Synapse behavior (verified): redacting a thread root does not strip `m.relates_to` from existing child events in sync responses. New replies to a redacted root still carry the original `event_id` in their thread relation.
+- Edge case: if a homeserver implementation strips thread aggregation bundles for redacted roots, thread resolution falls back to room-scoped routing. This is acceptable degraded behavior.
+- Test requirement: E2E test must verify that messages sent after root redaction still resolve to the same thread binding.
+
+14. `maxActiveBindings` rate limiting
+- Add configurable `maxActiveBindings` per account (default: 100).
+- When the limit is reached, new spawn requests return an operator-facing error ("thread binding limit reached for account <id>").
+- Config key: `channels.matrix.threadBindings.maxActiveBindings: number` (and per-account override).
+- Bindings approaching the limit (>80%) should log a warning (`matrix.thread.bindings_near_limit`).
+
+15. Hook registration order and error handling
+- Matrix subagent hooks must be registered during plugin `init()`, after the Matrix monitor is initialized but before the first sync event is processed.
+- If hook registration fails (e.g., binding service unavailable), log a non-fatal error (`matrix.thread.hook_registration_failed`) and proceed with room-scoped routing only. Thread binding features are degraded but the plugin remains functional.
+- If a hook handler throws during execution (e.g., `subagent_spawning` handler error), catch the error, log it (`matrix.thread.hook_handler_error`), and fall back to room-scoped behavior for that message. Do not crash or reject the inbound message.
+
 ### 3.2 Non-Functional Requirements
 
 1. Backward compatibility
@@ -102,7 +136,7 @@ As a result, Matrix does not match Discord’s proven thread-binding model, espe
 
 2. Determinism and correctness
 - Session key derivation and binding lookup must be deterministic across restarts.
-- Routing decisions must be auditable through logs/tests.
+- Routing decisions must be auditable through structured logs (see logging requirements below).
 
 3. Safety and resiliency
 - Malformed or partial `m.relates_to` payloads must fail safe (no crash, no incorrect cross-thread bind).
@@ -111,6 +145,34 @@ As a result, Matrix does not match Discord’s proven thread-binding model, espe
 4. Performance
 - Binding lookup must be constant/near-constant by conversation key and by session key.
 - TTL sweeps must be bounded and not block inbound message handling.
+
+5. Sweep timer lifecycle
+- Sweep runs on a periodic `setInterval` timer with a default interval of 60 seconds.
+- Timer is started during monitor initialization and cleared on monitor shutdown/dispose.
+- Each sweep iteration is bounded: iterate all bindings, check idle/max-age, remove expired. Must not block the event loop; use synchronous in-memory iteration (binding count is bounded by `maxActiveBindings`).
+- Sweep must be non-reentrant: if a previous sweep is still running (e.g., slow persistence write), skip the current tick.
+
+6. Logging and observability
+- All log events use structured fields and the `matrix.thread` namespace prefix.
+- Required log events:
+  - `matrix.thread.binding_created` — fields: `accountId`, `roomId`, `threadRootId`, `targetKind`, `targetSessionKey`, `activeCount`
+  - `matrix.thread.binding_resolved` — fields: `accountId`, `roomId`, `threadRootId`, `targetSessionKey`
+  - `matrix.thread.binding_expired` — fields: `accountId`, `roomId`, `threadRootId`, `reason` (`idle` | `max_age`), `age_ms`
+  - `matrix.thread.binding_removed` — fields: `accountId`, `roomId`, `threadRootId`, `reason` (`session_ended` | `expired` | `manual`)
+  - `matrix.thread.route_override` — fields: `accountId`, `roomId`, `threadRootId`, `fromKey`, `toKey`
+  - `matrix.thread.suffix_fallback` — fields: `accountId`, `roomId`, `threadRootId`, `derivedKey`
+  - `matrix.thread.decryption_failed` — fields: `accountId`, `roomId`, `eventId`, `error`
+  - `matrix.thread.persistence_corrupt` — fields: `path`, `error`
+  - `matrix.thread.hook_registration_failed` — fields: `hookName`, `error`
+  - `matrix.thread.hook_handler_error` — fields: `hookName`, `error`, `accountId`, `roomId`
+  - `matrix.thread.bindings_near_limit` — fields: `accountId`, `activeCount`, `maxActiveBindings`
+- Log levels: `binding_created`, `binding_resolved`, `route_override`, `suffix_fallback` at `debug`; `binding_expired`, `binding_removed` at `info`; error events at `warn` or `error`.
+
+7. Federation considerations
+- In federated rooms, thread root events may arrive with delay due to federation lag. If a message references a thread root that the bot's homeserver has not yet received, thread resolution will fail and the message routes as room-scoped.
+- This is acceptable degraded behavior: once the thread root event arrives via federation, subsequent messages will resolve correctly.
+- Binding creation requires the thread root event to be visible to the bot's homeserver. If a spawn request references an unknown thread root, the spawn should fail with a clear error rather than creating a dangling binding.
+- No special retry or backfill logic is required; federation convergence is expected to resolve within seconds for well-connected homeservers.
 
 ## 4. Implementation Scope
 
@@ -164,6 +226,7 @@ At channel level:
 - `channels.matrix.threadBindings.maxAgeHours: number`
 - `channels.matrix.threadBindings.spawnSubagentSessions: boolean`
 - `channels.matrix.threadBindings.spawnAcpSessions: boolean`
+- `channels.matrix.threadBindings.maxActiveBindings: number` (default: 100)
 
 At account override level:
 
@@ -172,6 +235,7 @@ At account override level:
 - `channels.matrix.accounts.<id>.threadBindings.maxAgeHours`
 - `channels.matrix.accounts.<id>.threadBindings.spawnSubagentSessions`
 - `channels.matrix.accounts.<id>.threadBindings.spawnAcpSessions`
+- `channels.matrix.accounts.<id>.threadBindings.maxActiveBindings`
 
 ### 5.2 Behavior Changes
 
@@ -183,7 +247,12 @@ At account override level:
 
 - No config breaking changes.
 - Existing thread suffix sessions remain valid fallback path.
-- If suffix normalization changes session key format, fallback compatibility must preserve access to existing thread sessions where possible.
+- Suffix normalization migration uses a dual-lookup strategy:
+  1. On routing, first look up the session key using the new normalized suffix.
+  2. If no session is found, look up using the raw (pre-normalization) suffix.
+  3. If found via raw suffix, optionally migrate: create an alias or copy the session under the normalized key.
+- The dual-lookup window is controlled by a config flag `channels.matrix.threadBindings.legacySuffixLookup: boolean` (default: `true`). Set to `false` once migration is complete to disable raw suffix fallback.
+- The `conversationId` separator is `||` (pipe-pipe), chosen to avoid conflicts with `#` (shell expansion, URL fragments) and `:` (already used in Matrix identifiers). Example: `!roomId:server.org||$eventId:server.org`.
 
 ## 6. Test Requirements
 
@@ -211,7 +280,16 @@ Follow the Matrix E2E strategy from `MATRIX_THREAD_SESSIONS_ANALYSIS.md`:
 - Outbound completion for bound sessions includes correct Matrix thread relation.
 - DM and non-thread room flows remain unchanged.
 
-3. Real homeserver E2E (Complement-first strategy)
+3. E2EE-specific tests
+- Unit: verify `resolveMatrixThreadRootId()` returns `undefined` when event content is still encrypted (undecrypted payload).
+- Unit: verify decryption failure triggers room-scoped fallback and logs `matrix.thread.decryption_failed`.
+- Integration: in an E2EE room, verify thread binding creation and routing work correctly after SDK decryption.
+- Integration: verify that a message with decryption failure does not create a binding or corrupt existing bindings.
+
+4. Real homeserver E2E (Complement-based strategy)
+- Complement provides Docker-based Synapse provisioning for reproducible homeserver environments.
+- Tests are written in TypeScript (not Go): use Complement's Docker provisioning to stand up homeservers, then drive tests via the matrix-js-sdk from Node.js/TypeScript test runners (Vitest).
+- Test harness responsibilities: start Synapse container(s), register test users, create rooms/threads, run assertions, tear down containers.
 - Required PR fast lane scenarios:
   - thread key derivation determinism
   - bound routing override
@@ -222,8 +300,11 @@ Follow the Matrix E2E strategy from `MATRIX_THREAD_SESSIONS_ANALYSIS.md`:
   - multi-account isolation
   - malformed relation and redaction edge cases
   - out-of-order event convergence
+  - thread root redaction followed by new replies (binding stability)
+  - federated room thread binding (two homeservers, federation lag)
+  - E2EE room thread binding lifecycle
 
-4. CI artifact expectations for E2E failures
+5. CI artifact expectations for E2E failures
 - capture OpenClaw logs
 - capture homeserver logs
 - capture room/thread event timeline used by assertions
@@ -247,6 +328,8 @@ Follow the Matrix E2E strategy from `MATRIX_THREAD_SESSIONS_ANALYSIS.md`:
 - Protocol-level changes beyond current Matrix thread relation usage.
 - New channel implementations beyond Matrix in this spec.
 - Additional ACP runtime architecture changes unrelated to Matrix binding integration.
+- **Matrix Spaces:** Space hierarchy and room relationships (MSC1772) are out of scope. Thread bindings operate at the individual room level; a room's membership in a Space does not affect binding behavior. Space-aware routing may be considered in future work.
+- **Pre-MSC3440 reply chains:** Older clients and bridges that use `m.in_reply_to` without `m.thread` relation type will not be detected as threaded messages. These messages route as room-scoped. This is a known limitation; adding reply-chain fallback detection is deferred to future work as it introduces ambiguity (a reply chain is not necessarily a thread).
 
 ## 9. References
 
