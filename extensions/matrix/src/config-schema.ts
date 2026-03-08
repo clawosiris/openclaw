@@ -35,6 +35,18 @@ const matrixRoomSchema = z
   })
   .optional();
 
+const matrixThreadBindingsSchema = z
+  .object({
+    enabled: z.boolean().optional(),
+    idleHours: z.number().nonnegative().optional(),
+    maxAgeHours: z.number().nonnegative().optional(),
+    spawnSubagentSessions: z.boolean().optional(),
+    spawnAcpSessions: z.boolean().optional(),
+    maxActiveBindings: z.number().int().positive().optional(),
+    legacySuffixLookup: z.boolean().optional(),
+  })
+  .optional();
+
 export const MatrixConfigSchema = z.object({
   name: z.string().optional(),
   enabled: z.boolean().optional(),
@@ -63,4 +75,5 @@ export const MatrixConfigSchema = z.object({
   groups: z.object({}).catchall(matrixRoomSchema).optional(),
   rooms: z.object({}).catchall(matrixRoomSchema).optional(),
   actions: matrixActionSchema,
+  threadBindings: matrixThreadBindingsSchema,
 });

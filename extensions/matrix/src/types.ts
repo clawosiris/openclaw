@@ -39,6 +39,23 @@ export type MatrixActionConfig = {
   channelInfo?: boolean;
 };
 
+export type MatrixThreadBindingsConfig = {
+  /** Enable Matrix thread binding features. Overrides session.threadBindings.enabled when set. */
+  enabled?: boolean;
+  /** Inactivity window in hours for Matrix thread-bound sessions. Set 0 to disable. */
+  idleHours?: number;
+  /** Hard max age in hours for Matrix thread-bound sessions. Set 0 to disable. */
+  maxAgeHours?: number;
+  /** Allow thread-bound subagent spawn flows. */
+  spawnSubagentSessions?: boolean;
+  /** Allow thread-bound ACP spawn flows. */
+  spawnAcpSessions?: boolean;
+  /** Maximum number of active thread bindings per account. */
+  maxActiveBindings?: number;
+  /** Keep fallback lookup for legacy raw thread suffixes. Default: true. */
+  legacySuffixLookup?: boolean;
+};
+
 /** Per-account Matrix config (excludes the accounts field to prevent recursion). */
 export type MatrixAccountConfig = Omit<MatrixConfig, "accounts">;
 
@@ -95,6 +112,8 @@ export type MatrixConfig = {
   rooms?: Record<string, MatrixRoomConfig>;
   /** Per-action tool gating (default: true for all). */
   actions?: MatrixActionConfig;
+  /** Matrix thread binding policies and limits. */
+  threadBindings?: MatrixThreadBindingsConfig;
 };
 
 export type CoreConfig = {
@@ -109,6 +128,11 @@ export type CoreConfig = {
   };
   session?: {
     store?: string;
+    threadBindings?: {
+      enabled?: boolean;
+      idleHours?: number;
+      maxAgeHours?: number;
+    };
   };
   messages?: {
     ackReaction?: string;
