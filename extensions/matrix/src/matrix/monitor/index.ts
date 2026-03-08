@@ -25,6 +25,8 @@ import { createDirectRoomTracker } from "./direct.js";
 import { registerMatrixMonitorEvents } from "./events.js";
 import { createMatrixRoomMessageHandler } from "./handler.js";
 import { createMatrixRoomInfoResolver } from "./room-info.js";
+import { createMatrixThreadBindingManager } from "./thread-bindings.manager.js";
+import { resolveMatrixThreadBindingRuntimeConfig } from "./thread-bindings.lifecycle.js";
 
 export type MonitorMatrixOpts = {
   runtime?: RuntimeEnv;
@@ -313,6 +315,10 @@ export async function monitorMatrixProvider(opts: MonitorMatrixOpts = {}): Promi
   const groupPolicy = allowlistOnly && groupPolicyRaw === "open" ? "allowlist" : groupPolicyRaw;
   const replyToMode = opts.replyToMode ?? accountConfig.replyToMode ?? "off";
   const threadReplies = accountConfig.threadReplies ?? "inbound";
+  const threadBindingConfig = resolveMatrixThreadBindingRuntimeConfig({
+    cfg,
+    accountId: account.accountId,
+  });
   const dmConfig = accountConfig.dm;
   const dmEnabled = dmConfig?.enabled ?? true;
   const dmPolicyRaw = dmConfig?.policy ?? "pairing";
@@ -331,6 +337,16 @@ export async function monitorMatrixProvider(opts: MonitorMatrixOpts = {}): Promi
   const warnedCryptoMissingRooms = new Set<string>();
 
   const { getRoomInfo, getMemberDisplayName } = createMatrixRoomInfoResolver(client);
+  const threadBindingsManager = threadBindingConfig.enabled
+    ? createMatrixThreadBindingManager({
+        accountId: account.accountId,
+        idleTimeoutMs: threadBindingConfig.idleTimeoutMs,
+        maxAgeMs: threadBindingConfig.maxAgeMs,
+        maxActiveBindings: threadBindingConfig.maxActiveBindings,
+        legacySuffixLookup: threadBindingConfig.legacySuffixLookup,
+        logger,
+      })
+    : null;
   const handleRoomMessage = createMatrixRoomMessageHandler({
     client,
     core,
@@ -354,6 +370,8 @@ export async function monitorMatrixProvider(opts: MonitorMatrixOpts = {}): Promi
     getRoomInfo,
     getMemberDisplayName,
     accountId: opts.accountId,
+    threadBindingLegacySuffixLookup:
+      threadBindingsManager?.getLegacySuffixLookupEnabled() ?? threadBindingConfig.legacySuffixLookup,
   });
 
   registerMatrixMonitorEvents({
@@ -399,6 +417,7 @@ export async function monitorMatrixProvider(opts: MonitorMatrixOpts = {}): Promi
     const onAbort = () => {
       try {
         logVerboseMessage("matrix: stopping client");
+        threadBindingsManager?.stop();
         stopSharedClientForAccount(auth, opts.accountId);
       } finally {
         setActiveMatrixClient(null, opts.accountId);

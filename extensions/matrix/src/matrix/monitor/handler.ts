@@ -1,5 +1,6 @@
 import type { LocationMessageEventContent, MatrixClient } from "@vector-im/matrix-bot-sdk";
 import {
+  getSessionBindingService,
   DEFAULT_ACCOUNT_ID,
   createScopedPairingAccess,
   createReplyPrefixOptions,
@@ -41,6 +42,8 @@ import { resolveMentions } from "./mentions.js";
 import { deliverMatrixReplies } from "./replies.js";
 import { resolveMatrixRoomConfig } from "./rooms.js";
 import { resolveMatrixThreadRootId, resolveMatrixThreadTarget } from "./threads.js";
+import { resolveMatrixThreadSessionKeyWithDualLookup } from "./thread-session-key.js";
+import { toMatrixConversationId } from "./thread-bindings.manager.js";
 import type { MatrixRawEvent, RoomMessageEventContent } from "./types.js";
 import { EventType, RelationType } from "./types.js";
 
@@ -75,6 +78,7 @@ export type MatrixMonitorHandlerParams = {
   ) => Promise<{ name?: string; canonicalAlias?: string; altAliases: string[] }>;
   getMemberDisplayName: (roomId: string, userId: string) => Promise<string>;
   accountId?: string | null;
+  threadBindingLegacySuffixLookup?: boolean;
 };
 
 export function createMatrixRoomMessageHandler(params: MatrixMonitorHandlerParams) {
@@ -101,6 +105,7 @@ export function createMatrixRoomMessageHandler(params: MatrixMonitorHandlerParam
     getRoomInfo,
     getMemberDisplayName,
     accountId,
+    threadBindingLegacySuffixLookup,
   } = params;
   const resolvedAccountId = accountId?.trim() || DEFAULT_ACCOUNT_ID;
   const pairing = createScopedPairingAccess({
@@ -420,6 +425,14 @@ export function createMatrixRoomMessageHandler(params: MatrixMonitorHandlerParam
       const messageId = event.event_id ?? "";
       const replyToEventId = content["m.relates_to"]?.["m.in_reply_to"]?.event_id;
       const threadRootId = resolveMatrixThreadRootId({ event, content });
+      if (content.msgtype === "m.bad.encrypted") {
+        logger.warn?.("matrix.thread.decryption_failed", {
+          accountId: resolvedAccountId,
+          roomId,
+          eventId: messageId,
+          error: "m.bad.encrypted",
+        });
+      }
       const threadTarget = resolveMatrixThreadTarget({
         threadReplies,
         messageId,
@@ -437,12 +450,54 @@ export function createMatrixRoomMessageHandler(params: MatrixMonitorHandlerParam
         },
       });
 
+      const sessionBindingService = getSessionBindingService();
+      const storePath = core.channel.session.resolveStorePath(cfg.session?.store, {
+        agentId: baseRoute.agentId,
+      });
+      let resolvedBindingSessionKey: string | undefined;
+      if (!isDirectMessage && threadRootId) {
+        const conversationId = toMatrixConversationId({ roomId, threadRootId });
+        const binding = sessionBindingService.resolveByConversation({
+          channel: "matrix",
+          accountId: resolvedAccountId,
+          conversationId,
+          parentConversationId: roomId,
+        });
+        if (binding?.targetSessionKey) {
+          resolvedBindingSessionKey = binding.targetSessionKey;
+          sessionBindingService.touch(binding.bindingId);
+          logger.debug?.("matrix.thread.route_override", {
+            accountId: resolvedAccountId,
+            roomId,
+            threadRootId,
+            fromKey: baseRoute.sessionKey,
+            toKey: resolvedBindingSessionKey,
+          });
+        }
+      }
+
       const route = {
         ...baseRoute,
-        sessionKey: threadRootId
-          ? `${baseRoute.sessionKey}:thread:${threadRootId}`
-          : baseRoute.sessionKey,
+        sessionKey: resolvedBindingSessionKey
+          ? resolvedBindingSessionKey
+          : threadRootId
+            ? resolveMatrixThreadSessionKeyWithDualLookup({
+                baseSessionKey: baseRoute.sessionKey,
+                threadRootId,
+                legacySuffixLookup: threadBindingLegacySuffixLookup !== false,
+                hasSessionKey: (sessionKey) =>
+                  core.channel.session.readSessionUpdatedAt({ storePath, sessionKey }) !== undefined,
+              }).sessionKey
+            : baseRoute.sessionKey,
       };
+      if (!resolvedBindingSessionKey && threadRootId) {
+        logger.debug?.("matrix.thread.suffix_fallback", {
+          accountId: resolvedAccountId,
+          roomId,
+          threadRootId,
+          derivedKey: route.sessionKey,
+        });
+      }
 
       let threadStarterBody: string | undefined;
       let threadLabel: string | undefined;
@@ -450,9 +505,7 @@ export function createMatrixRoomMessageHandler(params: MatrixMonitorHandlerParam
 
       if (threadRootId) {
         const existingSession = core.channel.session.readSessionUpdatedAt({
-          storePath: core.channel.session.resolveStorePath(cfg.session?.store, {
-            agentId: baseRoute.agentId,
-          }),
+          storePath,
           sessionKey: route.sessionKey,
         });
 
@@ -487,7 +540,7 @@ export function createMatrixRoomMessageHandler(params: MatrixMonitorHandlerParam
       const textWithId = threadRootId
         ? `${bodyText}\n[matrix event id: ${messageId} room: ${roomId} thread: ${threadRootId}]`
         : `${bodyText}\n[matrix event id: ${messageId} room: ${roomId}]`;
-      const { storePath, envelopeOptions, previousTimestamp } =
+      const { envelopeOptions, previousTimestamp } =
         resolveInboundSessionEnvelopeContext({
           cfg,
           agentId: route.agentId,
