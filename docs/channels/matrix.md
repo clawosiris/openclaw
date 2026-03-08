@@ -231,6 +231,39 @@ Notes:
 - `channels.matrix.replyToMode` controls reply-to metadata when not replying in a thread:
   - `off` (default), `first`, `all`
 
+### Thread-bound sessions
+
+Matrix also supports explicit thread-bound session routing via `threadBindings`.
+
+- Enable/disable Matrix thread bindings with `channels.matrix.threadBindings.enabled`.
+- Idle + max-age cleanup:
+  - `channels.matrix.threadBindings.idleHours`
+  - `channels.matrix.threadBindings.maxAgeHours`
+- Spawn controls:
+  - `channels.matrix.threadBindings.spawnSubagentSessions`
+  - `channels.matrix.threadBindings.spawnAcpSessions`
+- Capacity + migration controls:
+  - `channels.matrix.threadBindings.maxActiveBindings` (default: `100`)
+  - `channels.matrix.threadBindings.legacySuffixLookup` (default: `true`)
+
+Per-account overrides use the same shape under
+`channels.matrix.accounts.<id>.threadBindings.*`.
+
+Behavior:
+
+- For threaded room messages, Matrix resolves routing in this order:
+  - explicit binding for `<roomId>||<threadRootId>`
+  - normalized thread session suffix fallback
+- Spawned subagent/ACP sessions created from a Matrix thread are bound to that same thread context.
+- Follow-up replies for those bound sessions are delivered back into the same Matrix thread.
+
+Migration note:
+
+- Thread session suffixes are normalized for new lookups.
+- `legacySuffixLookup: true` keeps fallback lookup for older sessions that used raw thread suffixes.
+- After old sessions have naturally rotated out, set
+  `channels.matrix.threadBindings.legacySuffixLookup: false` to disable the legacy fallback.
+
 ## Capabilities
 
 | Feature         | Status                                                                                |
@@ -286,6 +319,13 @@ Provider options:
 - `channels.matrix.encryption`: enable E2EE (default: false).
 - `channels.matrix.initialSyncLimit`: initial sync limit.
 - `channels.matrix.threadReplies`: `off | inbound | always` (default: inbound).
+- `channels.matrix.threadBindings.enabled`: enable Matrix thread-bound session features (overrides `session.threadBindings.enabled` for Matrix).
+- `channels.matrix.threadBindings.idleHours`: inactivity timeout in hours for Matrix thread bindings (`0` disables idle expiry; defaults to session/global policy when unset).
+- `channels.matrix.threadBindings.maxAgeHours`: hard max age in hours for Matrix thread bindings (`0` disables max-age expiry; defaults to session/global policy when unset).
+- `channels.matrix.threadBindings.spawnSubagentSessions`: allow thread-bound subagent spawns.
+- `channels.matrix.threadBindings.spawnAcpSessions`: allow thread-bound ACP spawns.
+- `channels.matrix.threadBindings.maxActiveBindings`: max active thread bindings per Matrix account (default: `100`).
+- `channels.matrix.threadBindings.legacySuffixLookup`: keep legacy raw-suffix fallback for existing thread sessions (default: `true`).
 - `channels.matrix.textChunkLimit`: outbound text chunk size (chars).
 - `channels.matrix.chunkMode`: `length` (default) or `newline` to split on blank lines (paragraph boundaries) before length chunking.
 - `channels.matrix.dm.policy`: `pairing | allowlist | open | disabled` (default: pairing).
@@ -300,4 +340,5 @@ Provider options:
 - `channels.matrix.autoJoin`: invite handling (`always | allowlist | off`, default: always).
 - `channels.matrix.autoJoinAllowlist`: allowed room IDs/aliases for auto-join.
 - `channels.matrix.accounts`: multi-account configuration keyed by account ID (each account inherits top-level settings).
+- `channels.matrix.accounts.<id>.threadBindings.*`: per-account override for all Matrix thread binding options (`enabled`, `idleHours`, `maxAgeHours`, `spawnSubagentSessions`, `spawnAcpSessions`, `maxActiveBindings`, `legacySuffixLookup`).
 - `channels.matrix.actions`: per-action tool gating (reactions/messages/pins/memberInfo/channelInfo).
