@@ -4,6 +4,7 @@ import { matrixPlugin } from "./src/channel.js";
 import { ensureMatrixCryptoRuntime } from "./src/matrix/deps.js";
 import { setMatrixRuntime } from "./src/runtime.js";
 import { registerMatrixSubagentHooks } from "./src/subagent-hooks.js";
+export type { MatrixThreadBindingsConfig } from "./src/types.js";
 
 const plugin = {
   id: "matrix",

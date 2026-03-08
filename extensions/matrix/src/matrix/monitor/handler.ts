@@ -41,9 +41,9 @@ import { downloadMatrixMedia } from "./media.js";
 import { resolveMentions } from "./mentions.js";
 import { deliverMatrixReplies } from "./replies.js";
 import { resolveMatrixRoomConfig } from "./rooms.js";
-import { resolveMatrixThreadRootId, resolveMatrixThreadTarget } from "./threads.js";
-import { resolveMatrixThreadSessionKeyWithDualLookup } from "./thread-session-key.js";
 import { toMatrixConversationId } from "./thread-bindings.manager.js";
+import { resolveMatrixThreadSessionKeyWithDualLookup } from "./thread-session-key.js";
+import { resolveMatrixThreadRootId, resolveMatrixThreadTarget } from "./threads.js";
 import type { MatrixRawEvent, RoomMessageEventContent } from "./types.js";
 import { EventType, RelationType } from "./types.js";
 
@@ -118,7 +118,9 @@ export function createMatrixRoomMessageHandler(params: MatrixMonitorHandlerParam
     try {
       const eventType = event.type;
       if (eventType === EventType.RoomMessageEncrypted) {
-        // Encrypted messages are decrypted automatically by @vector-im/matrix-bot-sdk with crypto enabled
+        // E2EE messages are decrypted automatically by @vector-im/matrix-bot-sdk when crypto is enabled.
+        // If decryption fails, the event won't contain readable m.relates_to data, and thread
+        // detection will fall back to room-scoped routing (safe behavior per OpenSpec §3.2.3).
         return;
       }
 
@@ -486,7 +488,8 @@ export function createMatrixRoomMessageHandler(params: MatrixMonitorHandlerParam
                 threadRootId,
                 legacySuffixLookup: threadBindingLegacySuffixLookup !== false,
                 hasSessionKey: (sessionKey) =>
-                  core.channel.session.readSessionUpdatedAt({ storePath, sessionKey }) !== undefined,
+                  core.channel.session.readSessionUpdatedAt({ storePath, sessionKey }) !==
+                  undefined,
               }).sessionKey
             : baseRoute.sessionKey,
       };
@@ -540,12 +543,11 @@ export function createMatrixRoomMessageHandler(params: MatrixMonitorHandlerParam
       const textWithId = threadRootId
         ? `${bodyText}\n[matrix event id: ${messageId} room: ${roomId} thread: ${threadRootId}]`
         : `${bodyText}\n[matrix event id: ${messageId} room: ${roomId}]`;
-      const { envelopeOptions, previousTimestamp } =
-        resolveInboundSessionEnvelopeContext({
-          cfg,
-          agentId: route.agentId,
-          sessionKey: route.sessionKey,
-        });
+      const { envelopeOptions, previousTimestamp } = resolveInboundSessionEnvelopeContext({
+        cfg,
+        agentId: route.agentId,
+        sessionKey: route.sessionKey,
+      });
       const body = core.channel.reply.formatInboundEnvelope({
         channel: "Matrix",
         from: envelopeFrom,

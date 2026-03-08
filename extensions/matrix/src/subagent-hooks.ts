@@ -100,7 +100,10 @@ export function registerMatrixSubagentHooks(api: OpenClawPluginApi): void {
         error: summarizeError(error),
         accountId,
       });
-      return;
+      return {
+        status: "error" as const,
+        error: "Internal error in Matrix thread binding hook",
+      };
     }
   });
 

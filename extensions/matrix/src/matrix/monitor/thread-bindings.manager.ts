@@ -144,7 +144,15 @@ export function createMatrixThreadBindingManager(params: {
         at,
       });
     },
-    bindTarget: ({ roomId, threadRootId, targetKind, targetSessionKey, agentId, label, boundBy }) => {
+    bindTarget: ({
+      roomId,
+      threadRootId,
+      targetKind,
+      targetSessionKey,
+      agentId,
+      label,
+      boundBy,
+    }) => {
       const normalizedRoomId = roomId.trim();
       const normalizedThreadRootId = threadRootId.trim();
       const normalizedTargetSessionKey = targetSessionKey.trim();
@@ -206,6 +214,7 @@ export function createMatrixThreadBindingManager(params: {
         accountId,
         roomId: removed.roomId,
         threadRootId: removed.threadRootId,
+        targetSessionKey: removed.targetSessionKey,
         reason,
       });
       return removed;
@@ -245,7 +254,8 @@ export function createMatrixThreadBindingManager(params: {
         if (!live) {
           continue;
         }
-        const idleExpired = live.idleTimeoutMs > 0 && now >= live.lastActivityAt + live.idleTimeoutMs;
+        const idleExpired =
+          live.idleTimeoutMs > 0 && now >= live.lastActivityAt + live.idleTimeoutMs;
         const maxAgeExpired = live.maxAgeMs > 0 && now >= live.boundAt + live.maxAgeMs;
         if (!idleExpired && !maxAgeExpired) {
           continue;
