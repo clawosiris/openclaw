@@ -368,3 +368,142 @@ Tests to add/update:
 7. Add end-to-end tests for subagent session routing in Matrix threads.
 8. Validate no regressions for DM, non-thread room, and existing `threadReplies` behavior.
 
+---
+
+## 5) End-to-End Testing Strategy
+
+## 5.1 Recommended environment: Complement first, Trafficlight optional
+
+Recommendation: use **Complement** as the primary Matrix E2E harness.
+
+Why Complement is the better fit:
+
+- It is the Matrix Foundation ecosystem’s actively used black-box integration framework for homeservers.
+- It gives deterministic Dockerized homeserver lifecycle, multi-user room setup, and repeatable CI execution.
+- It already models Matrix protocol edge behavior (thread relations, redactions, federation/network quirks) that matter for thread-bound routing correctness.
+
+Trafficlight assessment:
+
+- The referenced repository (`nichenqin/trafficlight`) is not discoverable/reliably fetchable in current public Matrix testing references.
+- There is no clear evidence it is a maintained, widely adopted Matrix E2E harness comparable to Complement.
+- It can be treated as an optional local experimentation harness if/when validated, but should not be the baseline for OpenClaw CI.
+
+Secondary option:
+
+- `matrix-org/sytest` remains useful for homeserver compliance but is not ideal as the primary OpenClaw plugin E2E harness (older stack, less ergonomic for app-level flow assertions).
+
+## 5.2 Test server setup requirements
+
+Baseline stack (CI-safe):
+
+- Docker (or Podman with Docker API compatibility), plus network access for container networking.
+- One Matrix homeserver container (Synapse first; optionally Dendrite matrix in nightly jobs).
+- OpenClaw under test + Matrix extension enabled against the test homeserver account(s).
+- At least 3 Matrix users:
+  - user A: human sender / thread initiator
+  - user B: second human sender for isolation checks
+  - bot user: OpenClaw account
+- At least 2 rooms:
+  - room R1: main test room for thread lifecycle tests
+  - room R2: cross-room isolation guardrail
+- Seed data helpers to create:
+  - thread root events
+  - threaded replies (`m.relates_to.rel_type = m.thread`)
+  - non-thread room messages
+  - redaction events (`m.room.redaction`)
+
+OpenClaw config requirements:
+
+- Enable Matrix thread bindings with short test-friendly TTLs (example: idle 2-5 min, max-age 10-20 min for CI job speed).
+- Enable spawned subagent/session binding for Matrix test accounts.
+- Ensure account-scoped config is explicit so multi-account tests can assert no collision.
+
+## 5.3 End-to-end scenarios to validate
+
+1. Thread detection and session key generation
+- Given a room thread with root event `T1`, inbound events in that thread resolve to a thread-scoped session identity.
+- Assert deterministic key derivation for repeated messages in `T1`.
+- Assert different thread root (`T2`) yields a distinct session key.
+
+2. Subagent spawn binding to thread context
+- From thread `T1`, trigger subagent spawn.
+- Assert binding record created with `(accountId, roomId, threadRootId, targetSessionKey)`.
+- Assert spawn from non-thread room message follows product rule (strict error or explicit fallback mode).
+
+3. Message routing to bound sessions
+- Send follow-up user messages in `T1`; assert they route to bound `targetSessionKey` rather than creating a fresh route.
+- Send messages in room main timeline and thread `T2`; assert they do not route to `T1` bound session.
+
+4. Completion delivery back to correct thread
+- Emit completion from spawned session; assert outbound message is delivered to `roomId` with `m.thread` relation for `T1`.
+- Assert no leakage into main timeline or sibling threads.
+
+5. Binding cleanup on session end
+- Trigger subagent/session end.
+- Assert binding is removed and subsequent `T1` traffic uses normal route logic.
+
+6. Idle/max-age expiration
+- Simulate inactivity beyond idle threshold; assert binding expires.
+- Simulate age beyond max-age regardless of activity; assert binding expires.
+- Verify race safety around near-boundary activity updates (touch vs sweep timing).
+
+7. Multi-account isolation
+- Configure two Matrix bot accounts handling same room/thread identifiers in separate runs.
+- Assert binding lookup always includes account scoping and never cross-resolves.
+
+8. Edge cases
+- Redacted thread root: routing should remain stable if relation still references the root event id; no crash on missing content.
+- Redacted threaded message: ensure parser/handler ignores missing body safely.
+- Non-thread room messages: remain isolated from thread-bound sessions.
+- Malformed `m.relates_to`: ignore or fallback safely, no incorrect binding resolution.
+- Late/out-of-order events: ensure first valid thread event still converges to same bound session.
+
+## 5.4 CI integration approach
+
+Recommended pipeline split:
+
+- PR fast lane (required):
+  - Run lightweight Matrix E2E subset on single homeserver image (Synapse) with low scenario count focused on regressions:
+    - thread key derivation
+    - bound routing
+    - correct completion target
+    - cleanup on end
+- Nightly/extended lane:
+  - Full scenario matrix including TTL expiry and edge-case suites.
+  - Optional second homeserver implementation (Dendrite) to catch behavior assumptions.
+
+Operational guidance:
+
+- Keep tests black-box from OpenClaw process boundary (assert emitted/received Matrix events + persisted binding side effects).
+- Store structured test artifacts in CI:
+  - OpenClaw logs
+  - Matrix homeserver logs
+  - captured event timeline per room/thread
+- Use deterministic test clocks where possible (or controllable short TTL values) to avoid flaky expiry tests.
+
+## 5.5 Mock vs real Matrix server tradeoffs
+
+Mock server advantages:
+
+- Fast and deterministic unit/integration tests for parser and routing helper logic.
+- Easier fault injection for malformed events and corner payloads.
+
+Mock server limits:
+
+- Misses real homeserver behaviors around sync ordering, redactions, relation aggregation, and federation-adjacent quirks.
+- Can produce false confidence for thread semantics.
+
+Real homeserver (Complement-managed) advantages:
+
+- Validates actual Matrix protocol behavior end-to-end with realistic event flows.
+- Catches integration bugs at boundaries (registration, sync timelines, event auth/redaction handling, delivery formats).
+
+Real homeserver costs:
+
+- Slower, heavier CI jobs and more infrastructure variability.
+
+Pragmatic strategy:
+
+- Keep **unit + mocked integration tests** for high-speed inner loop.
+- Gate merges on a **small real-homeserver Complement suite**.
+- Run full real-homeserver matrix in nightly/periodic CI for deeper coverage.
