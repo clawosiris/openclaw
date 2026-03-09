@@ -1,0 +1,29 @@
+server_name: "localhost"
+pid_file: /tmp/homeserver.pid
+
+listeners:
+  - port: 8008
+    tls: false
+    type: http
+    x_forwarded: false
+    resources:
+      - names: [client, federation]
+        compress: false
+
+database:
+  name: sqlite3
+  args:
+    database: /tmp/homeserver.db
+
+media_store_path: /tmp/media_store
+registration_shared_secret: "openclaw-matrix-e2e-shared-secret"
+report_stats: false
+macaroon_secret_key: "openclaw-matrix-e2e-macaroon-secret"
+form_secret: "openclaw-matrix-e2e-form-secret"
+signing_key_path: "/tmp/localhost.signing.key"
+trusted_key_servers:
+  - server_name: "matrix.org"
+
+enable_registration: true
+enable_registration_without_verification: true
+enable_registration_without_verification_for_registration_tokens: true

@@ -1,0 +1,13 @@
+version: "3"
+
+services:
+  synapse:
+    image: docker.io/matrixdotorg/synapse:latest
+    container_name: openclaw-matrix-e2e-synapse
+    environment:
+      SYNAPSE_SERVER_NAME: localhost
+      SYNAPSE_REPORT_STATS: "no"
+    ports:
+      - "${MATRIX_E2E_PORT:-18008}:8008"
+    volumes:
+      - ./setup/homeserver.yaml:/data/homeserver.yaml
