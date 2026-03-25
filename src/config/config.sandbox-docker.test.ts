@@ -163,6 +163,36 @@ describe("sandbox docker config", () => {
     expect(res.ok).toBe(false);
   });
 
+  it("rejects userns host via Zod schema validation", () => {
+    const res = validateConfigObject({
+      agents: {
+        defaults: {
+          sandbox: {
+            docker: {
+              userns: "host",
+            },
+          },
+        },
+      },
+    });
+    expect(res.ok).toBe(false);
+  });
+
+  it("accepts valid userns values via Zod schema validation", () => {
+    const res = validateConfigObject({
+      agents: {
+        defaults: {
+          sandbox: {
+            docker: {
+              userns: "keep-id",
+            },
+          },
+        },
+      },
+    });
+    expect(res.ok).toBe(true);
+  });
+
   it("rejects non-string values in binds array", () => {
     const res = validateConfigObject({
       agents: {

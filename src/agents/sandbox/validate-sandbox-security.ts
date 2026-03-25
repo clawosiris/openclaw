@@ -34,6 +34,7 @@ export const BLOCKED_HOST_PATHS = [
 
 const BLOCKED_SECCOMP_PROFILES = new Set(["unconfined"]);
 const BLOCKED_APPARMOR_PROFILES = new Set(["unconfined"]);
+const BLOCKED_USERNS_MODES = new Set(["host"]);
 const RESERVED_CONTAINER_TARGET_PATHS = ["/workspace", SANDBOX_AGENT_WORKSPACE_MOUNT];
 
 export type ValidateBindMountsOptions = {
@@ -325,12 +326,23 @@ export function validateApparmorProfile(profile: string | undefined): void {
   }
 }
 
+export function validateUserns(userns: string | undefined): void {
+  if (userns && BLOCKED_USERNS_MODES.has(userns.trim().toLowerCase())) {
+    throw new Error(
+      `Sandbox security: userns "${userns}" is blocked. ` +
+        'Using "host" user namespace defeats container isolation. ' +
+        'Use "private", "keep-id" (Podman), or "auto" (Podman) instead.',
+    );
+  }
+}
+
 export function validateSandboxSecurity(
   cfg: {
     binds?: string[];
     network?: string;
     seccompProfile?: string;
     apparmorProfile?: string;
+    userns?: string;
     dangerouslyAllowContainerNamespaceJoin?: boolean;
   } & ValidateBindMountsOptions,
 ): void {
@@ -340,4 +352,5 @@ export function validateSandboxSecurity(
   });
   validateSeccompProfile(cfg.seccompProfile);
   validateApparmorProfile(cfg.apparmorProfile);
+  validateUserns(cfg.userns);
 }

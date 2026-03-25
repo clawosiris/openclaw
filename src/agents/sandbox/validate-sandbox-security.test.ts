@@ -8,6 +8,7 @@ import {
   validateNetworkMode,
   validateSeccompProfile,
   validateApparmorProfile,
+  validateUserns,
   validateSandboxSecurity,
 } from "./validate-sandbox-security.js";
 
@@ -267,6 +268,22 @@ describe("validateApparmorProfile", () => {
   });
 });
 
+describe("validateUserns", () => {
+  it("allows valid userns values", () => {
+    expect(() => validateUserns("private")).not.toThrow();
+    expect(() => validateUserns("keep-id")).not.toThrow();
+    expect(() => validateUserns("keep-id:uid=1000,gid=1000")).not.toThrow();
+    expect(() => validateUserns("auto")).not.toThrow();
+    expect(() => validateUserns(undefined)).not.toThrow();
+  });
+
+  it("blocks userns host (case-insensitive)", () => {
+    expect(() => validateUserns("host")).toThrow(/userns ".+" is blocked/);
+    expect(() => validateUserns("Host")).toThrow(/userns ".+" is blocked/);
+    expect(() => validateUserns("HOST")).toThrow(/userns ".+" is blocked/);
+  });
+});
+
 describe("profile hardening", () => {
   it.each([
     {
@@ -293,7 +310,17 @@ describe("validateSandboxSecurity", () => {
         network: "none",
         seccompProfile: "/tmp/seccomp.json",
         apparmorProfile: "openclaw-sandbox",
+        userns: "keep-id",
       }),
     ).not.toThrow();
+  });
+
+  it("throws when userns is host", () => {
+    expect(() =>
+      validateSandboxSecurity({
+        network: "none",
+        userns: "host",
+      }),
+    ).toThrow(/userns ".+" is blocked/);
   });
 });
