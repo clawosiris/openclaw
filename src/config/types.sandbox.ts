@@ -15,6 +15,14 @@ export type SandboxDockerSettings = {
   network?: string;
   /** Container user (uid:gid). */
   user?: string;
+  /**
+   * User namespace mode for the container.
+   * - "private": isolate user namespace (Docker default)
+   * - "keep-id": map container root to host UID (Podman)
+   * - "keep-id:uid=N,gid=N": Podman keep-id with explicit mappings
+   * - "auto": auto-allocate subordinate UIDs (Podman)
+   */
+  userns?: string;
   /** Drop Linux capabilities. */
   capDrop?: string[];
   /** Extra environment variables for sandbox exec. */

@@ -368,6 +368,9 @@ export function buildSandboxCreateArgs(params: {
   if (params.cfg.user) {
     args.push("--user", params.cfg.user);
   }
+  if (params.cfg.userns) {
+    args.push("--userns", params.cfg.userns);
+  }
   const envSanitization = sanitizeEnvVars(params.cfg.env ?? {}, params.envSanitizationOptions);
   if (envSanitization.blocked.length > 0) {
     log.warn(`Blocked sensitive environment variables: ${envSanitization.blocked.join(", ")}`);

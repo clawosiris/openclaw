@@ -103,6 +103,7 @@ export const SandboxDockerSchema = z
     network: z.string().optional(),
     user: z.string().optional(),
     capDrop: z.array(z.string()).optional(),
+    userns: z.string().optional(),
     env: z.record(z.string(), z.string()).optional(),
     setupCommand: z
       .union([z.string(), z.array(z.string())])
@@ -199,6 +200,15 @@ export const SandboxDockerSchema = z
         message:
           'Sandbox security: apparmor profile "unconfined" is blocked. ' +
           "Use a named AppArmor profile or omit this setting.",
+      });
+    }
+    if (data.userns?.trim().toLowerCase() === "host") {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ["userns"],
+        message:
+          'Sandbox security: userns "host" is blocked. ' +
+          'Use "private", "keep-id" (Podman), or "auto" (Podman) instead.',
       });
     }
   })

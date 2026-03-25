@@ -17,6 +17,7 @@ export function createSandboxTestContext(params?: {
     capDrop: [],
     seccompProfile: "",
     apparmorProfile: "",
+    userns: "",
     setupCommand: "",
     binds: [],
     dns: [],

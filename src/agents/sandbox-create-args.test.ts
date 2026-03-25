@@ -234,6 +234,12 @@ describe("buildSandboxCreateArgs", () => {
       cfg: createSandboxConfig({ apparmorProfile: "unconfined" }),
       expected: /apparmor profile "unconfined" is blocked/,
     },
+    {
+      name: "userns host",
+      containerName: "openclaw-sbx-userns-host",
+      cfg: createSandboxConfig({ userns: "host" }),
+      expected: /userns "host" is blocked/,
+    },
   ])("throws on $name", ({ containerName, cfg, expected }) => {
     expectBuildToThrow(containerName, cfg, expected);
   });
