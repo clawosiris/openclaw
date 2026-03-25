@@ -4,6 +4,11 @@ type SplitBindSpec = {
   options: string;
 };
 
+export type ParsedSandboxBindOptions = {
+  mode: "ro" | "rw";
+  idmap: boolean;
+};
+
 export function splitSandboxBindSpec(spec: string): SplitBindSpec | null {
   const separator = getHostContainerSeparatorIndex(spec);
   if (separator === -1) {
@@ -21,6 +26,33 @@ export function splitSandboxBindSpec(spec: string): SplitBindSpec | null {
     container: rest.slice(0, optionsStart),
     options: rest.slice(optionsStart + 1),
   };
+}
+
+export function parseSandboxBindOptions(options: string): ParsedSandboxBindOptions | null {
+  const trimmed = options.trim();
+  if (!trimmed) {
+    return { mode: "rw", idmap: false };
+  }
+
+  const parts = trimmed
+    .split(",")
+    .map((entry) => entry.trim().toLowerCase())
+    .filter(Boolean);
+
+  let mode: "ro" | "rw" = "rw";
+  let idmap = false;
+  for (const part of parts) {
+    if (part === "ro" || part === "rw") {
+      mode = part;
+      continue;
+    }
+    if (part === "idmap") {
+      idmap = true;
+      continue;
+    }
+    return null;
+  }
+  return { mode, idmap };
 }
 
 function getHostContainerSeparatorIndex(spec: string): number {

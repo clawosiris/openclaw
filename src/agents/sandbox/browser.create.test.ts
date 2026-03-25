@@ -222,4 +222,26 @@ describe("ensureSandboxBrowser create args", () => {
     expect(createArgs).toContain("/tmp/workspace:/workspace");
     expect(createArgs).not.toContain("/tmp/workspace:/workspace:ro");
   });
+
+  it("uses --mount for workspace and browser binds when idmap is enabled", async () => {
+    const cfg = buildConfig(false);
+    cfg.workspaceAccess = "ro";
+    cfg.docker.workspaceIdmap = true;
+    cfg.browser.binds = ["/tmp/browser-profile:/data/chrome:ro,idmap"];
+
+    await ensureSandboxBrowser({
+      scopeKey: "session:test",
+      workspaceDir: "/tmp/workspace",
+      agentWorkspaceDir: "/tmp/workspace",
+      cfg,
+    });
+
+    const createArgs = findDockerArgsCall(dockerMocks.execDocker.mock.calls, "create");
+    const mountArgs = collectDockerFlagValues(createArgs ?? [], "--mount");
+
+    expect(mountArgs).toContain("type=bind,source=/tmp/workspace,target=/workspace,readonly,idmap");
+    expect(mountArgs).toContain(
+      "type=bind,source=/tmp/browser-profile,target=/data/chrome,readonly,idmap",
+    );
+  });
 });

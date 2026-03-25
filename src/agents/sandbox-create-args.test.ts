@@ -197,6 +197,36 @@ describe("buildSandboxCreateArgs", () => {
     expect(vFlags).toContain("/var/data/myapp:/data:ro");
   });
 
+  it("uses --mount for idmap binds", () => {
+    const cfg = createSandboxConfig({
+      binds: ["/home/user/source:/source:rw,idmap", "/var/data/myapp:/data:ro,idmap"],
+    });
+
+    const args = buildSandboxCreateArgs({
+      name: "openclaw-sbx-idmap-binds",
+      cfg,
+      scopeKey: "main",
+      createdAtMs: 1700000000000,
+    });
+
+    const mountFlags = collectFlagValues(args, "--mount");
+    expect(mountFlags).toContain("type=bind,source=/home/user/source,target=/source,idmap");
+    expect(mountFlags).toContain("type=bind,source=/var/data/myapp,target=/data,readonly,idmap");
+    expect(collectFlagValues(args, "-v")).toEqual([]);
+  });
+
+  it("rejects unsupported idmap bind options", () => {
+    const cfg = createSandboxConfig({
+      binds: ["/home/user/source:/source:rw,idmap,Z"],
+    });
+
+    expectBuildToThrow(
+      "openclaw-sbx-idmap-invalid",
+      cfg,
+      /unsupported idmap options/,
+    );
+  });
+
   it.each([
     {
       name: "dangerous Docker socket bind mounts",
@@ -333,3 +363,16 @@ describe("buildSandboxCreateArgs", () => {
     expect(args).toEqual(expect.arrayContaining(["--network", "container:peer"]));
   });
 });
+
+function collectFlagValues(args: string[], flag: string): string[] {
+  const values: string[] = [];
+  for (let i = 0; i < args.length; i += 1) {
+    if (args[i] === flag) {
+      const value = args[i + 1];
+      if (value) {
+        values.push(value);
+      }
+    }
+  }
+  return values;
+}

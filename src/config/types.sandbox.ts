@@ -52,6 +52,8 @@ export type SandboxDockerSettings = {
   extraHosts?: string[];
   /** Additional bind mounts (host:container:mode format, e.g. ["/host/path:/container/path:rw"]). */
   binds?: string[];
+  /** Apply Podman bind idmap to workspace mounts. */
+  workspaceIdmap?: boolean;
   /**
    * Dangerous override: allow bind mounts that target reserved container paths
    * like /workspace or /agent.

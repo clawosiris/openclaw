@@ -169,6 +169,7 @@ import { computeSandboxConfigHash } from "./config-hash.js";
 import { DEFAULT_SANDBOX_IMAGE } from "./constants.js";
 import { readRegistry, updateRegistry } from "./registry.js";
 import { resolveSandboxAgentId, resolveSandboxScopeKey, slugifySessionKey } from "./shared.js";
+import { parseSandboxBindOptions, splitSandboxBindSpec } from "./bind-spec.js";
 import type { SandboxConfig, SandboxDockerConfig, SandboxWorkspaceAccess } from "./types.js";
 import { validateSandboxSecurity } from "./validate-sandbox-security.js";
 import { appendWorkspaceMountArgs } from "./workspace-mounts.js";
@@ -422,9 +423,7 @@ export function buildSandboxCreateArgs(params: {
     }
   }
   if (params.includeBinds !== false && params.cfg.binds?.length) {
-    for (const bind of params.cfg.binds) {
-      args.push("-v", bind);
-    }
+    appendCustomBinds(args, params.cfg);
   }
   return args;
 }
@@ -434,8 +433,42 @@ function appendCustomBinds(args: string[], cfg: SandboxDockerConfig): void {
     return;
   }
   for (const bind of cfg.binds) {
-    args.push("-v", bind);
+    appendDockerBindArg(args, bind);
   }
+}
+
+function appendDockerBindArg(args: string[], bind: string): void {
+  const parsed = splitSandboxBindSpec(bind);
+  if (!parsed) {
+    args.push("-v", bind);
+    return;
+  }
+
+  const options = parseSandboxBindOptions(parsed.options);
+  if (!options) {
+    if (parsed.options.toLowerCase().includes("idmap")) {
+      throw new Error(
+        `Sandbox security: bind mount "${bind}" uses unsupported idmap options. ` +
+          'Use only "ro,idmap", "rw,idmap", or "idmap".',
+      );
+    }
+    args.push("-v", bind);
+    return;
+  }
+
+  if (!options.idmap) {
+    args.push("-v", bind);
+    return;
+  }
+
+  const mount = [
+    "type=bind",
+    `source=${parsed.host}`,
+    `target=${parsed.container}`,
+    ...(options.mode === "ro" ? ["readonly"] : []),
+    "idmap",
+  ].join(",");
+  args.push("--mount", mount);
 }
 
 async function createSandboxContainer(params: {
@@ -465,6 +498,7 @@ async function createSandboxContainer(params: {
     agentWorkspaceDir: params.agentWorkspaceDir,
     workdir: cfg.workdir,
     workspaceAccess: params.workspaceAccess,
+    workspaceIdmap: cfg.workspaceIdmap,
   });
   appendCustomBinds(args, cfg);
   args.push(cfg.image, "sleep", "infinity");

@@ -46,4 +46,23 @@ describe("appendWorkspaceMountArgs", () => {
     const mounts = args.filter((arg) => arg.startsWith("/tmp/"));
     expect(mounts).toEqual(["/tmp/workspace:/workspace"]);
   });
+
+  it("uses --mount with idmap when workspaceIdmap is enabled", () => {
+    const args: string[] = [];
+    appendWorkspaceMountArgs({
+      args,
+      workspaceDir: "/tmp/workspace",
+      agentWorkspaceDir: "/tmp/agent-workspace",
+      workdir: "/workspace",
+      workspaceAccess: "ro",
+      workspaceIdmap: true,
+    });
+
+    expect(args).toEqual([
+      "--mount",
+      "type=bind,source=/tmp/workspace,target=/workspace,readonly,idmap",
+      "--mount",
+      "type=bind,source=/tmp/agent-workspace,target=/agent,readonly,idmap",
+    ]);
+  });
 });

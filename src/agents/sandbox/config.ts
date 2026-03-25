@@ -121,6 +121,7 @@ export function resolveSandboxDockerConfig(params: {
     dns: agentDocker?.dns ?? globalDocker?.dns,
     extraHosts: agentDocker?.extraHosts ?? globalDocker?.extraHosts,
     binds: binds.length ? binds : undefined,
+    workspaceIdmap: agentDocker?.workspaceIdmap ?? globalDocker?.workspaceIdmap,
     ...resolveDangerousSandboxDockerBooleans(agentDocker, globalDocker),
   };
 }

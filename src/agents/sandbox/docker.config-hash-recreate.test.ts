@@ -312,4 +312,31 @@ describe("ensureSandboxContainer config-hash recreation", () => {
       expect(bindArgs).toContain(expectedMainMount);
     },
   );
+
+  it("uses --mount for workspace and custom binds when idmap is enabled", async () => {
+    const workspaceDir = "/tmp/workspace";
+    const cfg = createSandboxConfig([], ["/tmp/data:/data:ro,idmap"]);
+    cfg.docker.workspaceIdmap = true;
+
+    spawnState.inspectRunning = false;
+    spawnState.labelHash = "";
+    registryMocks.readRegistry.mockResolvedValue({ entries: [] });
+    registryMocks.updateRegistry.mockResolvedValue(undefined);
+
+    await ensureSandboxContainer({
+      sessionKey: "agent:main:session-1",
+      workspaceDir,
+      agentWorkspaceDir: workspaceDir,
+      cfg,
+    });
+
+    const createCall = spawnState.calls.find(
+      (call) => call.command === "docker" && call.args[0] === "create",
+    );
+    expect(createCall).toBeDefined();
+
+    const mountArgs = collectDockerFlagValues(createCall?.args ?? [], "--mount");
+    expect(mountArgs).toContain("type=bind,source=/tmp/workspace,target=/workspace,idmap");
+    expect(mountArgs).toContain("type=bind,source=/tmp/data,target=/data,readonly,idmap");
+  });
 });

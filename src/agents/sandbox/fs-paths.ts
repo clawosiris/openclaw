@@ -1,6 +1,6 @@
 import path from "node:path";
 import { resolveSandboxInputPath, resolveSandboxPath } from "../sandbox-paths.js";
-import { splitSandboxBindSpec } from "./bind-spec.js";
+import { parseSandboxBindOptions, splitSandboxBindSpec } from "./bind-spec.js";
 import { SANDBOX_AGENT_WORKSPACE_MOUNT } from "./constants.js";
 import { resolveSandboxHostPathViaExistingAncestor } from "./host-paths.js";
 import { isPathInsideContainerRoot, normalizeContainerPath } from "./path-utils.js";
@@ -42,14 +42,8 @@ export function parseSandboxBindMount(spec: string): ParsedBindMount | null {
   if (!hostToken || !containerToken || !path.posix.isAbsolute(containerToken)) {
     return null;
   }
-  const optionsToken = parsed.options.trim().toLowerCase();
-  const optionParts = optionsToken
-    ? optionsToken
-        .split(",")
-        .map((entry) => entry.trim())
-        .filter(Boolean)
-    : [];
-  const writable = !optionParts.includes("ro");
+  const options = parseSandboxBindOptions(parsed.options);
+  const writable = options?.mode !== "ro";
   return {
     hostRoot: path.resolve(hostToken),
     containerRoot: normalizeContainerPath(containerToken),

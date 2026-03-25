@@ -9,6 +9,7 @@ import {
 import { deriveDefaultBrowserCdpPortRange } from "../../config/port-defaults.js";
 import { defaultRuntime } from "../../runtime.js";
 import { BROWSER_BRIDGES } from "./browser-bridges.js";
+import { parseSandboxBindOptions, splitSandboxBindSpec } from "./bind-spec.js";
 import { computeSandboxBrowserConfigHash } from "./config-hash.js";
 import { resolveSandboxBrowserDockerCreateConfig } from "./config.js";
 import { DEFAULT_SANDBOX_BROWSER_IMAGE, SANDBOX_BROWSER_SECURITY_HASH_EPOCH } from "./constants.js";
@@ -240,10 +241,11 @@ export async function ensureSandboxBrowser(params: {
       agentWorkspaceDir: params.agentWorkspaceDir,
       workdir: params.cfg.docker.workdir,
       workspaceAccess: params.cfg.workspaceAccess,
+      workspaceIdmap: params.cfg.docker.workspaceIdmap,
     });
     if (browserDockerCfg.binds?.length) {
       for (const bind of browserDockerCfg.binds) {
-        args.push("-v", bind);
+        appendBrowserBindArg(args, bind);
       }
     }
     args.push("-p", `127.0.0.1::${params.cfg.browser.cdpPort}`);
@@ -398,4 +400,38 @@ export async function ensureSandboxBrowser(params: {
     noVncUrl,
     containerName,
   };
+}
+
+function appendBrowserBindArg(args: string[], bind: string): void {
+  const parsed = splitSandboxBindSpec(bind);
+  if (!parsed) {
+    args.push("-v", bind);
+    return;
+  }
+
+  const options = parseSandboxBindOptions(parsed.options);
+  if (!options) {
+    if (parsed.options.toLowerCase().includes("idmap")) {
+      throw new Error(
+        `Sandbox security: bind mount "${bind}" uses unsupported idmap options. ` +
+          'Use only "ro,idmap", "rw,idmap", or "idmap".',
+      );
+    }
+    args.push("-v", bind);
+    return;
+  }
+
+  if (!options.idmap) {
+    args.push("-v", bind);
+    return;
+  }
+
+  const mount = [
+    "type=bind",
+    `source=${parsed.host}`,
+    `target=${parsed.container}`,
+    ...(options.mode === "ro" ? ["readonly"] : []),
+    "idmap",
+  ].join(",");
+  args.push("--mount", mount);
 }

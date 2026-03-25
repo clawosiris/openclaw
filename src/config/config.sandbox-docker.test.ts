@@ -62,6 +62,28 @@ describe("sandbox docker config", () => {
     }
   });
 
+  it("accepts workspaceIdmap in sandbox.docker config", () => {
+    const res = validateConfigObject({
+      agents: {
+        defaults: {
+          sandbox: {
+            docker: {
+              workspaceIdmap: true,
+              binds: ["/home/user/source:/source:rw,idmap"],
+            },
+          },
+        },
+      },
+    });
+    expect(res.ok).toBe(true);
+    if (res.ok) {
+      expect(res.config.agents?.defaults?.sandbox?.docker?.workspaceIdmap).toBe(true);
+      expect(res.config.agents?.defaults?.sandbox?.docker?.binds).toEqual([
+        "/home/user/source:/source:rw,idmap",
+      ]);
+    }
+  });
+
   it("rejects network host mode via Zod schema validation", () => {
     const res = validateConfigObject({
       agents: {
@@ -131,6 +153,22 @@ describe("sandbox docker config", () => {
       });
       expect(sharedScope[key]).toBe(true);
     }
+  });
+
+  it("prefers agent workspaceIdmap over global workspaceIdmap", () => {
+    const inherited = resolveSandboxDockerConfig({
+      scope: "agent",
+      globalDocker: { workspaceIdmap: true },
+      agentDocker: {},
+    });
+    expect(inherited.workspaceIdmap).toBe(true);
+
+    const overridden = resolveSandboxDockerConfig({
+      scope: "agent",
+      globalDocker: { workspaceIdmap: true },
+      agentDocker: { workspaceIdmap: false },
+    });
+    expect(overridden.workspaceIdmap).toBe(false);
   });
 
   it("rejects seccomp unconfined via Zod schema validation", () => {
