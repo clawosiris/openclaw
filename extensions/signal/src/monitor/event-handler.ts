@@ -60,6 +60,8 @@ import type {
 import { resolveSignalQuoteContext } from "./inbound-context.js";
 import { renderSignalMentions } from "./mentions.js";
 
+const SIGNAL_OBJECT_REPLACEMENT = "\uFFFC";
+
 function formatAttachmentKindCount(kind: string, count: number): string {
   if (kind === "attachment") {
     return `${count} file${count > 1 ? "s" : ""}`;
@@ -95,6 +97,23 @@ function resolveSignalInboundRoute(params: {
       id: params.isGroup ? (params.groupId ?? "unknown") : params.senderPeerId,
     },
   });
+}
+
+function normalizeLeadingSignalCommandPlaceholder(
+  message: string,
+  cfg: SignalEventHandlerDeps["cfg"],
+): string {
+  if (!message.includes(SIGNAL_OBJECT_REPLACEMENT)) {
+    return message;
+  }
+  const match = message.match(/^(\s*)\uFFFC+([^\s][\s\S]*)$/);
+  if (!match) {
+    return message;
+  }
+  const [, leadingWhitespace, remainder] = match;
+  const normalizedCommand = remainder.startsWith("/") ? remainder : `/${remainder}`;
+  const candidate = `${leadingWhitespace}${normalizedCommand}`;
+  return hasControlCommand(candidate, cfg) ? candidate : message;
 }
 
 export function createSignalEventHandler(deps: SignalEventHandlerDeps) {
@@ -549,7 +568,10 @@ export function createSignalEventHandler(deps: SignalEventHandlerDeps) {
     // Replace ￼ (object replacement character) with @uuid or @phone from mentions
     // Signal encodes mentions as the object replacement character; hydrate them from metadata first.
     const rawMessage = dataMessage?.message ?? "";
-    const normalizedMessage = renderSignalMentions(rawMessage, dataMessage?.mentions);
+    const normalizedMessage = normalizeLeadingSignalCommandPlaceholder(
+      renderSignalMentions(rawMessage, dataMessage?.mentions),
+      deps.cfg,
+    );
     const messageText = normalizedMessage.trim();
     const groupId = dataMessage?.groupInfo?.groupId ?? reaction?.groupInfo?.groupId ?? undefined;
     const isGroup = Boolean(groupId);

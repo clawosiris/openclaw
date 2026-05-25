@@ -249,6 +249,22 @@ describe("signal mention gating", () => {
     expect(getCapturedCtx().Body).toContain("/help");
   });
 
+  it("normalizes a leading object replacement character into a slash command before gating", async () => {
+    const handler = createMentionHandler({ requireMention: true });
+
+    await handler(makeGroupEvent({ message: "\uFFFCstatus" }));
+
+    expect(String(getCapturedCtx().Body ?? "")).toContain("/status");
+  });
+
+  it("does not treat a leading object replacement character as a command when the remainder is unknown", async () => {
+    const handler = createMentionHandler({ requireMention: true });
+
+    await handler(makeGroupEvent({ message: "\uFFFCnotacommand" }));
+
+    expect(capturedCtx).toBeUndefined();
+  });
+
   it("hydrates mention placeholders before trimming so offsets stay aligned", async () => {
     const handler = createMentionHandler({ requireMention: false });
 
