@@ -6,6 +6,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 type SignalMsgContext = Pick<MsgContext, "Body" | "WasMentioned"> & {
   Body?: string;
   WasMentioned?: boolean;
+  CommandSource?: "text" | "native";
 };
 
 let capturedCtx: SignalMsgContext | undefined;
@@ -255,6 +256,16 @@ describe("signal mention gating", () => {
     await handler(makeGroupEvent({ message: "\uFFFCstatus" }));
 
     expect(String(getCapturedCtx().Body ?? "")).toContain("/status");
+    expect(getCapturedCtx().CommandSource).toBe("text");
+  });
+
+  it("normalizes a leading object replacement character plus space into a slash command before gating", async () => {
+    const handler = createMentionHandler({ requireMention: true });
+
+    await handler(makeGroupEvent({ message: "\uFFFC status" }));
+
+    expect(String(getCapturedCtx().Body ?? "")).toContain("/status");
+    expect(getCapturedCtx().CommandSource).toBe("text");
   });
 
   it("does not treat a leading object replacement character as a command when the remainder is unknown", async () => {

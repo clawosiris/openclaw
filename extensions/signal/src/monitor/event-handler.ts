@@ -106,7 +106,7 @@ function normalizeLeadingSignalCommandPlaceholder(
   if (!message.includes(SIGNAL_OBJECT_REPLACEMENT)) {
     return message;
   }
-  const match = message.match(/^(\s*)\uFFFC+([^\s][\s\S]*)$/);
+  const match = message.match(/^(\s*)\uFFFC+\s*([^\s][\s\S]*)$/);
   if (!match) {
     return message;
   }
@@ -240,6 +240,11 @@ export function createSignalEventHandler(deps: SignalEventHandlerDeps) {
       MediaTypes: entry.mediaTypes,
       WasMentioned: entry.isGroup ? entry.wasMentioned === true : undefined,
       CommandAuthorized: entry.commandAuthorized,
+      // Tag typed text-slash commands so visible command acknowledgements are not
+      // suppressed under message_tool_only delivery modes.
+      CommandSource: entry.commandAuthorized && hasControlCommand(entry.commandBody, deps.cfg)
+        ? ("text" as const)
+        : undefined,
       OriginatingChannel: "signal" as const,
       OriginatingTo: signalTo,
     });
